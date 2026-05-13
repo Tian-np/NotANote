@@ -18,7 +18,9 @@ dist-ssr
 .idea
 .DS_Store
 
-# Env (keep .env.example tracked for contributors)
+# Env: never commit secrets. Dev: copy .env.example to .env.local (Vite reads it locally).
+# CI / GitHub Pages: add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY under repo Settings > Secrets and variables > Actions.
+# Ignoring .env.local only affects git tracking, not Vite on your machine.
 .env
 .env.local
 .env.*.local

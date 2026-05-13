@@ -5,6 +5,10 @@ charset = utf-8
 end_of_line = lf
 insert_final_newline = true
 
+# Windows editors sometimes save .gitignore as UTF-16; Git then mis-parses patterns.
+[.gitignore]
+charset = utf-8
+
 [*.{json,ts,tsx,yml,yaml,css,html,md}]
 indent_style = space
 indent_size = 2
