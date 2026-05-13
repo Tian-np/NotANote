@@ -73,6 +73,16 @@ The included GitHub Action sets `VITE_BASE=/NotANote/` automatically. If you ren
 3. Push to `main` or `master`. The workflow **Deploy GitHub Pages** builds with the correct base path and publishes `dist/`.
 4. After the first run, your site will be at `https://tian-np.github.io/NotANote/` (adjust user and repo to match yours).
 
+### If deploy fails with `HttpError: Not Found` / `Creating Pages deployment failed`
+
+That almost always means **GitHub Pages is not turned on for this repo**, or the source is not **GitHub Actions**.
+
+1. Open **Settings → [Pages](https://github.com/Tian-np/NotANote/settings/pages)** for the repo.
+2. Under **Build and deployment → Source**, choose **GitHub Actions** (not “Deploy from a branch”). Save if the UI asks you to.
+3. Re-run the failed workflow: **Actions → Deploy GitHub Pages → Re-run all jobs** (or push an empty commit).
+
+Until Source is **GitHub Actions**, the **deploy** job cannot create a Pages deployment and `actions/deploy-pages` returns **404**.
+
 ## Deploy — Vercel
 
 1. Import the GitHub repository in [Vercel](https://vercel.com).
