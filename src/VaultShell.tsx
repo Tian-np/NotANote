@@ -68,6 +68,16 @@ export function VaultShell({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [importConfirm, setImportConfirm] = useState<{ imported: VaultData; blob: StoredBlob } | null>(null);
 
+  /** Draft for “create new” modal — not persisted until user clicks บันทึก. */
+  const [createModal, setCreateModal] = useState<{
+    type: VaultEntry["type"];
+    title: string;
+    content: string;
+    url: string;
+    username: string;
+    password: string;
+  } | null>(null);
+
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -124,22 +134,51 @@ export function VaultShell({
     scheduleSave(next, vaultPassword);
   };
 
-  const addEntry = (type: VaultEntry["type"]) => {
-    const id = newId();
-    const base: VaultEntry = {
-      id,
+  const openCreateModal = (type: VaultEntry["type"]) => {
+    setCreateModal({
       type,
       title: type === "note" ? "Untitled note" : "Untitled login",
-      updatedAt: Date.now(),
-      content: type === "note" ? "" : undefined,
-      url: type === "login" ? "" : undefined,
-      username: type === "login" ? "" : undefined,
-      password: type === "login" ? "" : undefined,
-    };
+      content: "",
+      url: "",
+      username: "",
+      password: "",
+    });
+  };
+
+  const submitCreateModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createModal) return;
+    const id = newId();
+    const titleTrim = createModal.title.trim();
+    const base: VaultEntry =
+      createModal.type === "note"
+        ? {
+            id,
+            type: "note",
+            title: titleTrim || "Untitled note",
+            updatedAt: Date.now(),
+            content: createModal.content,
+          }
+        : {
+            id,
+            type: "login",
+            title: titleTrim || "Untitled login",
+            updatedAt: Date.now(),
+            url: createModal.url,
+            username: createModal.username,
+            password: createModal.password,
+          };
     const next = { ...data, entries: [base, ...data.entries] };
     setData(next);
-    setActiveId(id);
-    scheduleSave(next, vaultPassword);
+    setCreateModal(null);
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    void persist(next, vaultPassword).catch(() => {
+      setToast("Could not save — check connection or storage.");
+    });
+    showToast("บันทึกแล้ว");
   };
 
   const confirmDelete = () => {
@@ -264,7 +303,7 @@ export function VaultShell({
             ? "h-14 min-h-[3.5rem] flex-col gap-1 rounded-xl px-2 text-sm font-bold shadow-md"
             : "flex min-h-[3.75rem] flex-col items-center justify-center gap-1 rounded-xl py-4 text-base font-bold shadow-md sm:flex-row sm:gap-3 sm:px-5"
         }
-        onClick={() => addEntry("note")}
+        onClick={() => openCreateModal("note")}
       >
         <FileText className={opts.compact ? "h-6 w-6" : "h-7 w-7 shrink-0"} aria-hidden />
         <span className="flex flex-col leading-tight">
@@ -280,7 +319,7 @@ export function VaultShell({
             ? "h-14 min-h-[3.5rem] flex-col gap-1 rounded-xl border-2 border-cyan-400/70 bg-cyan-950/50 px-2 text-sm font-bold text-cyan-50 shadow-md hover:bg-cyan-900/60"
             : "flex min-h-[3.75rem] flex-col items-center justify-center gap-1 rounded-xl border-2 border-cyan-400/70 bg-cyan-950/40 py-4 text-base font-bold text-cyan-50 shadow-md hover:bg-cyan-900/50 sm:flex-row sm:gap-3 sm:px-5"
         }
-        onClick={() => addEntry("login")}
+        onClick={() => openCreateModal("login")}
       >
         <KeyRound className={opts.compact ? "h-6 w-6" : "h-7 w-7 shrink-0"} aria-hidden />
         <span className="flex flex-col leading-tight">
@@ -553,6 +592,92 @@ export function VaultShell({
           </div>
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={createModal !== null}
+        onOpenChange={(open) => {
+          if (!open) setCreateModal(null);
+        }}
+      >
+        <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+          {createModal ? (
+            <>
+              <DialogHeader className="shrink-0 border-b border-border/60 px-6 pb-4 pt-6 text-left">
+                <DialogTitle>{createModal.type === "note" ? "โน้ตใหม่" : "รหัสเว็บใหม่"}</DialogTitle>
+                <DialogDescription className="sr-only">
+                  {createModal.type === "note" ? "กรอกหัวข้อและเนื้อหา แล้วกดบันทึก" : "กรอกข้อมูลล็อกอิน แล้วกดบันทึก"}
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={submitCreateModal} className="flex min-h-0 flex-1 flex-col">
+                <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="create-title">หัวข้อ</Label>
+                      <Input
+                        id="create-title"
+                        value={createModal.title}
+                        onChange={(ev) => setCreateModal((d) => (d ? { ...d, title: ev.target.value } : d))}
+                        className="min-h-11"
+                      />
+                    </div>
+                    {createModal.type === "note" ? (
+                      <div className="space-y-2">
+                        <Label htmlFor="create-content">เนื้อหา</Label>
+                        <Textarea
+                          id="create-content"
+                          value={createModal.content}
+                          onChange={(ev) => setCreateModal((d) => (d ? { ...d, content: ev.target.value } : d))}
+                          placeholder="พิมพ์โน้ต…"
+                          className="min-h-[140px]"
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <Label htmlFor="create-url">URL เว็บ</Label>
+                          <Input
+                            id="create-url"
+                            className="min-h-11"
+                            value={createModal.url}
+                            onChange={(ev) => setCreateModal((d) => (d ? { ...d, url: ev.target.value } : d))}
+                            placeholder="https://…"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="create-user">ชื่อผู้ใช้ / อีเมล</Label>
+                          <Input
+                            id="create-user"
+                            className="min-h-11"
+                            value={createModal.username}
+                            onChange={(ev) => setCreateModal((d) => (d ? { ...d, username: ev.target.value } : d))}
+                            placeholder="อีเมลหรือชื่อผู้ใช้"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="create-pass">รหัสผ่าน</Label>
+                          <PasswordInput
+                            id="create-pass"
+                            value={createModal.password}
+                            onChange={(v) => setCreateModal((d) => (d ? { ...d, password: v } : d))}
+                            autoComplete="new-password"
+                            resetKey={createModal.type === "login" ? "create-login-draft" : "closed"}
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <DialogFooter className="shrink-0 gap-2 border-t border-border/60 px-6 py-4 sm:gap-0">
+                  <Button type="button" variant="outline" onClick={() => setCreateModal(null)}>
+                    ยกเลิก
+                  </Button>
+                  <Button type="submit">บันทึก</Button>
+                </DialogFooter>
+              </form>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showChangePw} onOpenChange={(o) => !busy && setShowChangePw(o)}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md" onPointerDownOutside={(e) => busy && e.preventDefault()}>

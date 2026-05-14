@@ -6,6 +6,12 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  displayUsername,
+  isValidUsername,
+  normalizeUsername,
+  usernameToAuthEmail,
+} from "./authUsername";
 import { fetchVaultPayload, upsertVaultPayload } from "./cloudVault";
 import { getSupabase } from "./supabaseClient";
 import type { VaultData } from "./types";
@@ -13,17 +19,29 @@ import { emptyVault } from "./types";
 import { resealWithNewPassword, sealVault, unlockVault, type StoredBlob } from "./storage";
 import { VaultShell } from "./VaultShell";
 
+/** Maps Supabase Auth errors to clearer hints (especially built-in email quotas). */
+function authErrorHint(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("rate limit") && (m.includes("email") || m.includes("mail"))) {
+    return (
+      "Supabase’s built-in email quota was exceeded (very low on free tier). " +
+      "Turn off “Confirm email” under Dashboard → Authentication → Providers → Email so sign-up does not send mail. " +
+      "Or wait for the window to reset, or configure Custom SMTP (Project Settings → Authentication)."
+    );
+  }
+  return message;
+}
+
 export function CloudApp() {
   const sb = getSupabase();
   const [init, setInit] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [tab, setTab] = useState("login");
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [info, setInfo] = useState<string | null>(null);
 
   const [vaultPassword, setVaultPassword] = useState<string | null>(null);
   const [vaultData, setVaultData] = useState<VaultData | null>(null);
@@ -61,7 +79,10 @@ export function CloudApp() {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
-    setInfo(null);
+    if (!isValidUsername(username)) {
+      setAuthError("Username: 3–32 characters, lowercase letters, digits, and underscores only.");
+      return;
+    }
     if (password.length < 8) {
       setAuthError("Use at least 8 characters for your password.");
       return;
@@ -70,15 +91,23 @@ export function CloudApp() {
       setAuthError("Passwords do not match.");
       return;
     }
+    const normalized = normalizeUsername(username);
+    const authEmail = usernameToAuthEmail(normalized);
     setBusy(true);
     try {
-      const { data, error } = await sb.auth.signUp({ email, password });
+      const { data, error } = await sb.auth.signUp({
+        email: authEmail,
+        password,
+        options: { data: { username: normalized } },
+      });
       if (error) {
-        setAuthError(error.message);
+        setAuthError(authErrorHint(error.message));
         return;
       }
       if (!data.session) {
-        setInfo("Check your email to confirm your account, then sign in here.");
+        setAuthError(
+          "No session after sign-up. In Supabase → Authentication → Providers → Email, turn off “Confirm email” so accounts work without email verification (and avoid email rate limits)."
+        );
         return;
       }
       const userId = data.session.user.id;
@@ -88,7 +117,7 @@ export function CloudApp() {
       setSession(data.session);
       await openVault(userId, password);
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : "Sign up failed.");
+      setAuthError(err instanceof Error ? authErrorHint(err.message) : "Sign up failed.");
     } finally {
       setBusy(false);
     }
@@ -97,19 +126,23 @@ export function CloudApp() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
-    setInfo(null);
+    if (!isValidUsername(username)) {
+      setAuthError("Username: 3–32 characters, lowercase letters, digits, and underscores only.");
+      return;
+    }
+    const authEmail = usernameToAuthEmail(normalizeUsername(username));
     setBusy(true);
     try {
-      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      const { data, error } = await sb.auth.signInWithPassword({ email: authEmail, password });
       if (error) {
-        setAuthError(error.message);
+        setAuthError(authErrorHint(error.message));
         return;
       }
       const userId = data.session.user.id;
       await openVault(userId, password);
       setPassword("");
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : "Sign in failed.");
+      setAuthError(err instanceof Error ? authErrorHint(err.message) : "Sign in failed.");
     } finally {
       setBusy(false);
     }
@@ -198,7 +231,7 @@ export function CloudApp() {
         onLock={onLock}
         topBarExtra={
           <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-            <span className="max-w-[220px] truncate text-xs text-muted-foreground sm:text-sm">{session.user.email}</span>
+            <span className="max-w-[220px] truncate text-xs text-muted-foreground sm:text-sm">{displayUsername(session.user)}</span>
             <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => void handleLogout()}>
               ออกจากระบบ
             </Button>
@@ -214,7 +247,7 @@ export function CloudApp() {
         <Card className="w-full max-w-md border-border/80 shadow-2xl">
           <CardHeader>
             <CardTitle>Unlock vault</CardTitle>
-            <CardDescription>Signed in as {session.user.email}. Enter your account password.</CardDescription>
+            <CardDescription>Signed in as {displayUsername(session.user)}. Enter your account password.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleUnlockWithPassword} className="space-y-4">
@@ -243,7 +276,10 @@ export function CloudApp() {
       <Card className="w-full max-w-md border-border/80 shadow-2xl">
         <CardHeader>
           <CardTitle>NotANote</CardTitle>
-          <CardDescription>Sign in to sync your encrypted vault across devices.</CardDescription>
+          <CardDescription>
+            Sign in to sync your encrypted vault across devices. Username only—no email verification; the app maps your
+            username to an internal id required by Supabase (no messages are sent).
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs value={tab} onValueChange={(v) => { setTab(v); setAuthError(null); }} className="w-full">
@@ -254,15 +290,23 @@ export function CloudApp() {
             <TabsContent value="login" className="mt-4 space-y-4">
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="em">Email</Label>
-                  <Input id="em" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="min-h-11" />
+                  <Label htmlFor="username-login">Username</Label>
+                  <Input
+                    id="username-login"
+                    type="text"
+                    autoComplete="username"
+                    spellCheck={false}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    required
+                    className="min-h-11"
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="lpw">Password</Label>
                   <PasswordInput id="lpw" value={password} onChange={setPassword} autoComplete="current-password" required resetKey={tab} />
                 </div>
                 {authError ? <p className="text-sm text-destructive">{authError}</p> : null}
-                {info ? <p className="text-sm text-muted-foreground">{info}</p> : null}
                 <Button type="submit" className="w-full min-h-11" disabled={busy}>
                   Log in
                 </Button>
@@ -271,8 +315,18 @@ export function CloudApp() {
             <TabsContent value="register" className="mt-4 space-y-4">
               <form onSubmit={handleRegister} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="rem">Email</Label>
-                  <Input id="rem" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="min-h-11" />
+                  <Label htmlFor="username-register">Username</Label>
+                  <Input
+                    id="username-register"
+                    type="text"
+                    autoComplete="username"
+                    spellCheck={false}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    required
+                    className="min-h-11"
+                  />
+                  <p className="text-xs text-muted-foreground">3–32 chars: a–z, 0–9, underscore. Stored as lowercase.</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="rpw">Password</Label>
@@ -283,7 +337,6 @@ export function CloudApp() {
                   <PasswordInput id="rpw2" value={password2} onChange={setPassword2} autoComplete="new-password" required />
                 </div>
                 {authError ? <p className="text-sm text-destructive">{authError}</p> : null}
-                {info ? <p className="text-sm text-muted-foreground">{info}</p> : null}
                 <Button type="submit" className="w-full min-h-11" disabled={busy}>
                   Create account
                 </Button>
