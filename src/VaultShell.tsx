@@ -158,6 +158,8 @@ export function VaultShell({
 
   const createTitleRef = useRef<HTMLInputElement>(null);
   const editTitleRef = useRef<HTMLInputElement>(null);
+  const createModalWasOpenRef = useRef(false);
+  const editModalWasOpenRef = useRef(false);
 
   useEffect(() => {
     setData(initialData);
@@ -246,15 +248,33 @@ export function VaultShell({
   }, [showToast]);
 
   useEffect(() => {
-    if (!createModal) return;
-    const id = requestAnimationFrame(() => createTitleRef.current?.focus());
-    return () => cancelAnimationFrame(id);
+    const open = createModal !== null;
+    if (!open) {
+      createModalWasOpenRef.current = false;
+      return;
+    }
+    if (!createModalWasOpenRef.current) {
+      createModalWasOpenRef.current = true;
+      const id = requestAnimationFrame(() => {
+        createTitleRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(id);
+    }
   }, [createModal]);
 
   useEffect(() => {
-    if (!editDraft) return;
-    const id = requestAnimationFrame(() => editTitleRef.current?.focus());
-    return () => cancelAnimationFrame(id);
+    const open = editDraft !== null;
+    if (!open) {
+      editModalWasOpenRef.current = false;
+      return;
+    }
+    if (!editModalWasOpenRef.current) {
+      editModalWasOpenRef.current = true;
+      const id = requestAnimationFrame(() => {
+        editTitleRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(id);
+    }
   }, [editDraft]);
 
   const openCreateModal = (type: VaultEntry["type"]) => {
