@@ -16,6 +16,7 @@ A small, **private** notes app you can host on **GitHub Pages** or **Vercel**. N
 - **Master password (local mode)** — create, unlock, change password (re-encrypts the vault).
 - **Encrypted backup** — export/import JSON.
 - **Modern UI** — dark theme, responsive layout.
+- **Try here : https://tian-np.github.io/NotANote/
 
 ## Supabase (multi-device + login)
 
