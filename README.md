@@ -1,4 +1,4 @@
-# NotANote
+# NotANote(https://tian-np.github.io/NotANote)
 
 A small, **private** notes app you can host on **GitHub Pages** or **Vercel**. Notes are **encrypted in the browser** with Web Crypto (PBKDF2 + AES-GCM).
 
@@ -16,7 +16,6 @@ A small, **private** notes app you can host on **GitHub Pages** or **Vercel**. N
 - **Master password (local mode)** — create, unlock, change password (re-encrypts the vault).
 - **Encrypted backup** — export/import JSON.
 - **Modern UI** — dark theme, responsive layout.
-- **Try here : https://tian-np.github.io/NotANote/
 
 ## Supabase (multi-device + login)
 
