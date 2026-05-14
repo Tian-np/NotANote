@@ -1,4 +1,4 @@
-# NotANote(https://tian-np.github.io/NotANote)
+# [NotANote](https://tian-np.github.io/NotANote)
 
 A small, **private** notes app you can host on **GitHub Pages** or **Vercel**. Notes are **encrypted in the browser** with Web Crypto (PBKDF2 + AES-GCM).
 
