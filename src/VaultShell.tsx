@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileText, KeyRound, MoreVertical } from "lucide-react";
+import {
+  FileText,
+  FolderCog,
+  GripVertical,
+  KeyRound,
+  MoreVertical,
+} from "lucide-react";
 import { PasswordInput } from "@/components/PasswordInput";
 import {
   AlertDialog,
@@ -24,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
@@ -33,7 +40,7 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { VaultData, VaultEntry } from "./types";
+import type { VaultData, VaultEntry, VaultFolder } from "./types";
 import { sealVault, unlockVault, type StoredBlob } from "./storage";
 
 type VaultEntryType = VaultEntry["type"];
@@ -50,12 +57,64 @@ function entriesEqual(a: VaultEntry | null, b: VaultEntry | null): boolean {
   if (!a || !b || a.id !== b.id) return false;
   return (
     a.title === b.title &&
+    (a.folderId ?? null) === (b.folderId ?? null) &&
     (a.content ?? "") === (b.content ?? "") &&
     (a.url ?? "") === (b.url ?? "") &&
     (a.username ?? "") === (b.username ?? "") &&
     (a.password ?? "") === (b.password ?? "")
   );
 }
+
+type FolderScope = "all" | "ungrouped" | string;
+
+function sortFoldersByName(folders: VaultFolder[]): VaultFolder[] {
+  return [...folders].sort((a, b) =>
+    a.name.localeCompare(b.name, "th", { sensitivity: "base" }),
+  );
+}
+
+function folderTitle(folders: VaultFolder[], id: string | null | undefined): string {
+  if (!id) return "";
+  return folders.find((f) => f.id === id)?.name ?? "";
+}
+
+function groupedSections(
+  entries: VaultEntry[],
+  folders: VaultFolder[],
+): { key: string; title: string; items: VaultEntry[] }[] {
+  const folderById = new Map(folders.map((f) => [f.id, f]));
+  const bucket = new Map<string, VaultEntry[]>();
+  const push = (key: string, e: VaultEntry) => {
+    const cur = bucket.get(key);
+    if (cur) cur.push(e);
+    else bucket.set(key, [e]);
+  };
+  for (const e of entries) {
+    const fid = e.folderId;
+    const valid = Boolean(fid && folderById.has(fid));
+    push(valid && fid ? fid : "__none", e);
+  }
+  const out: { key: string; title: string; items: VaultEntry[] }[] = [];
+  for (const f of sortFoldersByName(folders)) {
+    const items = bucket.get(f.id);
+    if (items?.length) out.push({ key: f.id, title: f.name, items });
+  }
+  const none = bucket.get("__none");
+  if (none?.length) out.push({ key: "__none", title: "ไม่มีหมวด", items: none });
+  return out;
+}
+
+/** MIME สำหรับลากรายการจากโหมดไม่มีหมวดไปวางในหมวด */
+const DND_ENTRY_MIME = "application/x-notanote-entry-id";
+
+function isEntryUngrouped(entry: VaultEntry, folders: VaultFolder[]): boolean {
+  const fid = entry.folderId;
+  if (!fid) return true;
+  return !folders.some((f) => f.id === fid);
+}
+
+const selectLikeClass =
+  "flex h-11 min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
 function cloneEntry(e: VaultEntry): VaultEntry {
   return JSON.parse(JSON.stringify(e)) as VaultEntry;
@@ -123,6 +182,15 @@ export function VaultShell({
   const [data, setData] = useState<VaultData>(initialData);
   const [query, setQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | VaultEntryType>("all");
+  const [folderScope, setFolderScope] = useState<FolderScope>("all");
+  const [foldersManageOpen, setFoldersManageOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [renameFolderId, setRenameFolderId] = useState<string | null>(null);
+  const [renameFolderText, setRenameFolderText] = useState("");
+  const [deleteFolderTarget, setDeleteFolderTarget] = useState<VaultFolder | null>(
+    null,
+  );
+  const [dropHoverFolderId, setDropHoverFolderId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [showChangePw, setShowChangePw] = useState(false);
   const [oldPw, setOldPw] = useState("");
@@ -149,6 +217,7 @@ export function VaultShell({
     url: string;
     username: string;
     password: string;
+    folderId: string;
   } | null>(null);
 
   /** Edit modal: baseline vs draft for dirty detection. */
@@ -166,6 +235,14 @@ export function VaultShell({
     setEditDraft(null);
     setEditBaseline(null);
   }, [initialData]);
+
+  useEffect(() => {
+    if (folderScope !== "all" && folderScope !== "ungrouped") {
+      if (!data.folders.some((f) => f.id === folderScope)) {
+        setFolderScope("all");
+      }
+    }
+  }, [data.folders, folderScope]);
 
   const persist = useCallback(
     async (next: VaultData, pw: string) => {
@@ -210,6 +287,62 @@ export function VaultShell({
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const assignEntryToFolder = useCallback(
+    (entryId: string, targetFolderId: string) => {
+      const folderExists = data.folders.some((f) => f.id === targetFolderId);
+      if (!folderExists) return;
+      const en = data.entries.find((x) => x.id === entryId);
+      if (!en || !isEntryUngrouped(en, data.folders)) return;
+      const label = folderTitle(data.folders, targetFolderId);
+      const next: VaultData = {
+        ...data,
+        entries: data.entries.map((item) =>
+          item.id === entryId
+            ? { ...item, folderId: targetFolderId, updatedAt: Date.now() }
+            : item,
+        ),
+      };
+      setData(next);
+      void persistWithFeedback(next);
+      showToast(`ย้ายไปหมวด "${label}" แล้ว`);
+    },
+    [data, persistWithFeedback, showToast],
+  );
+
+  const handleFolderDropTargetDragOver = useCallback(
+    (folderId: string) => (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "move";
+      setDropHoverFolderId(folderId);
+    },
+    [],
+  );
+
+  const handleFolderDropLeave = useCallback((e: React.DragEvent) => {
+    const related = e.relatedTarget as Node | null;
+    if (e.currentTarget.contains(related)) return;
+    setDropHoverFolderId(null);
+  }, []);
+
+  const handleFolderDrop = useCallback(
+    (folderId: string) => (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDropHoverFolderId(null);
+      const entryId = e.dataTransfer.getData(DND_ENTRY_MIME);
+      if (!entryId) return;
+      assignEntryToFolder(entryId, folderId);
+    },
+    [assignEntryToFolder],
+  );
+
+  useEffect(() => {
+    const clearHighlight = () => setDropHoverFolderId(null);
+    window.addEventListener("dragend", clearHighlight);
+    return () => window.removeEventListener("dragend", clearHighlight);
   }, []);
 
   const handleLock = useCallback(() => {
@@ -277,6 +410,11 @@ export function VaultShell({
     }
   }, [editDraft]);
 
+  const defaultFolderIdForCreate = useCallback((): string => {
+    if (folderScope === "all" || folderScope === "ungrouped") return "";
+    return folderScope;
+  }, [folderScope]);
+
   const openCreateModal = (type: VaultEntry["type"]) => {
     setCreateModal({
       type,
@@ -285,6 +423,7 @@ export function VaultShell({
       url: "",
       username: "",
       password: "",
+      folderId: defaultFolderIdForCreate(),
     });
   };
 
@@ -293,6 +432,8 @@ export function VaultShell({
     if (!createModal) return;
     const id = newId();
     const titleTrim = createModal.title.trim();
+    const folderPick = createModal.folderId.trim();
+    const folderId = folderPick ? folderPick : null;
     const base: VaultEntry =
       createModal.type === "note"
         ? {
@@ -301,6 +442,7 @@ export function VaultShell({
             title: titleTrim || "",
             updatedAt: Date.now(),
             content: createModal.content,
+            folderId,
           }
         : {
             id,
@@ -310,12 +452,63 @@ export function VaultShell({
             url: createModal.url,
             username: createModal.username,
             password: createModal.password,
+            folderId,
           };
     const next = { ...data, entries: [base, ...data.entries] };
     setData(next);
     setCreateModal(null);
     void persistWithFeedback(next);
     showToast("บันทึกแล้ว");
+  };
+
+  const submitNewFolder = (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newFolderName.trim();
+    if (!name) return;
+    const folder: VaultFolder = {
+      id: newId(),
+      name,
+      updatedAt: Date.now(),
+    };
+    const next = { ...data, folders: [...data.folders, folder] };
+    setData(next);
+    setNewFolderName("");
+    void persistWithFeedback(next);
+    showToast("สร้างหมวดแล้ว");
+  };
+
+  const saveRenameFolder = () => {
+    if (!renameFolderId) return;
+    const name = renameFolderText.trim();
+    if (!name) return;
+    const next = {
+      ...data,
+      folders: data.folders.map((f) =>
+        f.id === renameFolderId ? { ...f, name, updatedAt: Date.now() } : f,
+      ),
+    };
+    setData(next);
+    setRenameFolderId(null);
+    setRenameFolderText("");
+    void persistWithFeedback(next);
+    showToast("เปลี่ยนชื่อหมวดแล้ว");
+  };
+
+  const completeFolderDelete = () => {
+    if (!deleteFolderTarget) return;
+    const id = deleteFolderTarget.id;
+    const next: VaultData = {
+      ...data,
+      folders: data.folders.filter((f) => f.id !== id),
+      entries: data.entries.map((en) =>
+        en.folderId === id ? { ...en, folderId: null } : en,
+      ),
+    };
+    setData(next);
+    setDeleteFolderTarget(null);
+    if (folderScope === id) setFolderScope("all");
+    void persistWithFeedback(next);
+    showToast("ลบหมวดแล้ว — รายการย้ายไปไม่มีหมวด");
   };
 
   const openEditModal = (entry: VaultEntry) => {
@@ -447,13 +640,20 @@ export function VaultShell({
     if (filterType !== "all") {
       list = list.filter((e) => e.type === filterType);
     }
+    if (folderScope === "ungrouped") {
+      list = list.filter((e) => !e.folderId);
+    } else if (folderScope !== "all") {
+      list = list.filter((e) => e.folderId === folderScope);
+    }
     if (!qLower) return list;
     return list.filter((e) => {
+      const folderLabel = folderTitle(data.folders, e.folderId);
       const hay = [
         e.title,
         e.content,
         e.url,
         e.username,
+        folderLabel,
         e.type === "login" ? "login" : "note",
       ]
         .filter(Boolean)
@@ -461,7 +661,14 @@ export function VaultShell({
         .toLowerCase();
       return hay.includes(qLower);
     });
-  }, [data, qLower, filterType]);
+  }, [data.entries, data.folders, qLower, filterType, folderScope]);
+
+  const listSections = useMemo(() => {
+    if (folderScope !== "all") {
+      return [{ key: "flat", title: "", items: filtered }];
+    }
+    return groupedSections(filtered, data.folders);
+  }, [filtered, folderScope, data.folders]);
 
   const submitChangePw = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -500,6 +707,11 @@ export function VaultShell({
         : syncStatus === "error"
           ? "บันทึกไม่สำเร็จ"
           : null;
+
+  const sortedFoldersUi = useMemo(
+    () => sortFoldersByName(data.folders),
+    [data.folders],
+  );
 
   const filterButtons = (
     <div className="flex flex-wrap gap-1 rounded-lg border border-border/70 bg-muted/30 p-1 justify-between">
@@ -594,6 +806,79 @@ export function VaultShell({
           />
         </div>
         <div className="w-full sm:w-auto sm:min-w-[280px]">{filterButtons}</div>
+      </div>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Label className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            หมวดหมู่
+          </Label>
+          <Button
+            id="vault-folders-manage-button"
+            data-cy="vault-folders-manage-button"
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 shrink-0 gap-1.5"
+            onClick={() => setFoldersManageOpen(true)}
+          >
+            <FolderCog className="h-4 w-4 shrink-0" aria-hidden />
+            จัดการหมวด
+          </Button>
+        </div>
+        <p className="text-[0.7rem] leading-snug text-muted-foreground sm:text-xs">
+          ลากไอคอนจับ{" "}
+          <GripVertical
+            className="inline-block h-3.5 w-3.5 align-text-bottom opacity-80"
+            aria-hidden
+          />{" "}
+          ที่การ์ดในกลุ่ม &quot;ไม่มีหมวด&quot; มาวางที่ชื่อหมวด (หรือหัวข้อกลุ่ม)
+        </p>
+        <div className="flex gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <Button
+            id="vault-folder-scope-all"
+            data-cy="vault-folder-scope-all"
+            type="button"
+            size="sm"
+            variant={folderScope === "all" ? "secondary" : "outline"}
+            className="h-9 shrink-0"
+            onClick={() => setFolderScope("all")}
+          >
+            ทั้งหมด
+          </Button>
+          <Button
+            id="vault-folder-scope-ungrouped"
+            data-cy="vault-folder-scope-ungrouped"
+            type="button"
+            size="sm"
+            variant={folderScope === "ungrouped" ? "secondary" : "outline"}
+            className="h-9 shrink-0"
+            onClick={() => setFolderScope("ungrouped")}
+          >
+            ไม่มีหมวด
+          </Button>
+          {sortedFoldersUi.map((f) => (
+            <Button
+              key={f.id}
+              id={`vault-folder-scope-${f.id}`}
+              data-cy={`vault-folder-scope-${f.id}`}
+              type="button"
+              size="sm"
+              variant={folderScope === f.id ? "secondary" : "outline"}
+              className={cn(
+                "h-9 max-w-[220px] shrink-0 truncate transition-[box-shadow,background-color]",
+                dropHoverFolderId === f.id &&
+                  "bg-primary/15 ring-2 ring-primary/50 ring-offset-2 ring-offset-background",
+              )}
+              title={`${f.name} — วางรายการที่ไม่มีหมวดที่นี่`}
+              onClick={() => setFolderScope(f.id)}
+              onDragOver={handleFolderDropTargetDragOver(f.id)}
+              onDragLeave={handleFolderDropLeave}
+              onDrop={handleFolderDrop(f.id)}
+            >
+              {f.name}
+            </Button>
+          ))}
+        </div>
       </div>
       <div className="hidden md:block">
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -714,46 +999,111 @@ export function VaultShell({
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {filtered.map((e) => {
-                const prev = previewLine(e);
-                const titleDisplay = e.title || "ไม่มีชื่อ";
-                return (
-                  <Card
-                    key={e.id}
-                    role="button"
-                    tabIndex={0}
-                    className="cursor-pointer border-border/80 px-4 py-5 transition hover:border-primary/45 hover:shadow-lg active:scale-[0.99] sm:py-6"
-                    onClick={() => openEditModal(e)}
-                    onKeyDown={(ev) => {
-                      if (ev.key === "Enter" || ev.key === " ") {
-                        ev.preventDefault();
-                        openEditModal(e);
-                      }
-                    }}
-                  >
-                    <div className="flex w-full items-start justify-between gap-2">
-                      <CardTitle className="line-clamp-3 min-w-0 flex-1 text-start text-base font-semibold leading-snug sm:text-left">
-                        <HighlightText
-                          text={titleDisplay}
-                          needle={query.trim()}
-                        />
-                      </CardTitle>
-                      <Badge
-                        variant={e.type === "login" ? "login" : "default"}
-                        className="shrink-0 normal-case tracking-normal"
+            <div className="space-y-8">
+              {listSections.map((section) => (
+                <section key={section.key} className="space-y-3">
+                  {section.title ? (
+                    data.folders.some((folder) => folder.id === section.key) ? (
+                      <div
+                        id={`vault-folder-section-drop-${section.key}`}
+                        data-cy={`vault-folder-section-drop-${section.key}`}
+                        className={cn(
+                          "-mx-1 rounded-md px-1 py-1 transition-colors",
+                          dropHoverFolderId === section.key &&
+                            "bg-primary/15 ring-2 ring-primary/40",
+                        )}
+                        onDragOver={handleFolderDropTargetDragOver(section.key)}
+                        onDragLeave={handleFolderDropLeave}
+                        onDrop={handleFolderDrop(section.key)}
                       >
-                        {e.type === "login" ? "รหัสผ่าน" : "โน้ต"}
-                      </Badge>
-                    </div>
-                    {prev ? (
-                      <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
-                        <HighlightText text={prev} needle={query.trim()} />
-                      </p>
-                    ) : null}
-                  </Card>
-                );
-              })}
+                        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                          {section.title}
+                        </h2>
+                      </div>
+                    ) : (
+                      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        {section.title}
+                      </h2>
+                    )
+                  ) : null}
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {section.items.map((e) => {
+                      const prev = previewLine(e);
+                      const titleDisplay = e.title || "ไม่มีชื่อ";
+                      const ungrouped = isEntryUngrouped(e, data.folders);
+                      return (
+                        <Card
+                          key={e.id}
+                          role="button"
+                          tabIndex={0}
+                          className={cn(
+                            "cursor-pointer border-border/80 px-4 py-5 transition hover:border-primary/45 hover:shadow-lg active:scale-[0.99] sm:py-6",
+                            ungrouped && "border-dashed border-muted-foreground/25",
+                          )}
+                          onClick={() => openEditModal(e)}
+                          onKeyDown={(ev) => {
+                            if (ev.key === "Enter" || ev.key === " ") {
+                              ev.preventDefault();
+                              openEditModal(e);
+                            }
+                          }}
+                        >
+                          <div className="flex gap-1">
+                            {ungrouped ? (
+                              <div
+                                draggable
+                                tabIndex={-1}
+                                id={`vault-entry-drag-handle-${e.id}`}
+                                data-cy={`vault-entry-drag-handle-${e.id}`}
+                                className="-ml-1 shrink-0 cursor-grab touch-none rounded-md p-1.5 text-muted-foreground hover:bg-muted/80 active:cursor-grabbing"
+                                title="ลากไปวางในหมวด"
+                                aria-label="ลากรายการไปวางในหมวด"
+                                onDragStart={(ev) => {
+                                  ev.stopPropagation();
+                                  ev.dataTransfer.setData(DND_ENTRY_MIME, e.id);
+                                  ev.dataTransfer.effectAllowed = "move";
+                                }}
+                                onClick={(ev) => ev.stopPropagation()}
+                              >
+                                <GripVertical
+                                  className="pointer-events-none h-5 w-5"
+                                  aria-hidden
+                                />
+                              </div>
+                            ) : null}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex w-full items-start justify-between gap-2">
+                                <CardTitle className="line-clamp-3 min-w-0 flex-1 text-start text-base font-semibold leading-snug sm:text-left">
+                                  <HighlightText
+                                    text={titleDisplay}
+                                    needle={query.trim()}
+                                  />
+                                </CardTitle>
+                                <Badge
+                                  variant={
+                                    e.type === "login" ? "login" : "default"
+                                  }
+                                  className="shrink-0 normal-case tracking-normal"
+                                >
+                                  {e.type === "login" ? "รหัสผ่าน" : "โน้ต"}
+                                </Badge>
+                              </div>
+                              {prev ? (
+                                <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
+                                  <HighlightText
+                                    text={prev}
+                                    needle={query.trim()}
+                                  />
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
         </div>
@@ -883,6 +1233,27 @@ export function VaultShell({
                         placeholder="Unititled Note"
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="create-folder-select">หมวดหมู่</Label>
+                      <select
+                        id="create-folder-select"
+                        data-cy="create-folder-select"
+                        className={selectLikeClass}
+                        value={createModal.folderId}
+                        onChange={(ev) =>
+                          setCreateModal((d) =>
+                            d ? { ...d, folderId: ev.target.value } : d,
+                          )
+                        }
+                      >
+                        <option value="">ไม่มีหมวด</option>
+                        {sortedFoldersUi.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                     {createModal.type === "note" ? (
                       <div className="space-y-2">
                         <Label htmlFor="create-content">เนื้อหา</Label>
@@ -1009,6 +1380,34 @@ export function VaultShell({
                         className="min-h-11"
                         placeholder="Untitled login"
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-folder-select">หมวดหมู่</Label>
+                      <select
+                        id="edit-folder-select"
+                        data-cy="edit-folder-select"
+                        className={selectLikeClass}
+                        value={editDraft.folderId ?? ""}
+                        onChange={(ev) =>
+                          setEditDraft((d) =>
+                            d
+                              ? {
+                                  ...d,
+                                  folderId: ev.target.value
+                                    ? ev.target.value
+                                    : null,
+                                }
+                              : d,
+                          )
+                        }
+                      >
+                        <option value="">ไม่มีหมวด</option>
+                        {sortedFoldersUi.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     {editDraft.type === "note" ? (
                       <div className="space-y-2">
@@ -1147,6 +1546,156 @@ export function VaultShell({
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={foldersManageOpen}
+        onOpenChange={(o) => {
+          setFoldersManageOpen(o);
+          if (!o) {
+            setRenameFolderId(null);
+            setRenameFolderText("");
+          }
+        }}
+      >
+        <DialogContent
+          className="max-h-[90dvh] overflow-y-auto sm:max-w-md"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>จัดการหมวดหมู่</DialogTitle>
+            <DialogDescription className="sr-only">
+              สร้าง เปลี่ยนชื่อ หรือลบหมวดเพื่อจัดกลุ่มโน้ตและรหัสเว็บ
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitNewFolder} className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="new-folder-name">หมวดใหม่</Label>
+              <Input
+                id="new-folder-name"
+                value={newFolderName}
+                onChange={(ev) => setNewFolderName(ev.target.value)}
+                placeholder="เช่น งาน · ส่วนตัว · โปรเจกต์"
+                className="min-h-11"
+              />
+            </div>
+            <Button
+              id="vault-folder-create-submit-button"
+              data-cy="vault-folder-create-submit-button"
+              type="submit"
+              className="w-full"
+            >
+              สร้างหมวด
+            </Button>
+          </form>
+          <Separator className="my-4" />
+          <div className="max-h-[min(40vh,320px)] space-y-3 overflow-y-auto pr-1">
+            {sortedFoldersUi.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                ยังไม่มีหมวด — สร้างจากด้านบน
+              </p>
+            ) : (
+              sortedFoldersUi.map((f) => (
+                <div
+                  key={f.id}
+                  className="flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+                >
+                  {renameFolderId === f.id ? (
+                    <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                      <Input
+                        id={`vault-folder-rename-input-${f.id}`}
+                        value={renameFolderText}
+                        onChange={(ev) => setRenameFolderText(ev.target.value)}
+                        className="min-h-11 sm:min-w-0 sm:flex-1"
+                      />
+                      <div className="flex shrink-0 gap-2">
+                        <Button
+                          id={`vault-folder-rename-save-${f.id}`}
+                          data-cy={`vault-folder-rename-save-${f.id}`}
+                          type="button"
+                          size="sm"
+                          onClick={() => saveRenameFolder()}
+                        >
+                          บันทึก
+                        </Button>
+                        <Button
+                          id={`vault-folder-rename-cancel-${f.id}`}
+                          data-cy={`vault-folder-rename-cancel-${f.id}`}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setRenameFolderId(null);
+                            setRenameFolderText("");
+                          }}
+                        >
+                          ยกเลิก
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="min-w-0 flex-1 truncate font-medium">{f.name}</p>
+                      <div className="flex shrink-0 gap-2">
+                        <Button
+                          id={`vault-folder-rename-open-${f.id}`}
+                          data-cy={`vault-folder-rename-open-${f.id}`}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setRenameFolderId(f.id);
+                            setRenameFolderText(f.name);
+                          }}
+                        >
+                          เปลี่ยนชื่อ
+                        </Button>
+                        <Button
+                          id={`vault-folder-delete-open-${f.id}`}
+                          data-cy={`vault-folder-delete-open-${f.id}`}
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => setDeleteFolderTarget(f)}
+                        >
+                          ลบ
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={!!deleteFolderTarget}
+        onOpenChange={(o) => !o && setDeleteFolderTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              ลบหมวด &quot;{deleteFolderTarget?.name}&quot;?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              รายการในหมวดนี้จะถูกย้ายไป &quot;ไม่มีหมวด&quot; ข้อมูลโน้ตและรหัสไม่ถูกลบ
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel id="vault-folder-delete-cancel-button" data-cy="vault-folder-delete-cancel-button">
+              ยกเลิก
+            </AlertDialogCancel>
+            <AlertDialogAction
+              id="vault-folder-delete-confirm-button"
+              data-cy="vault-folder-delete-confirm-button"
+              onClick={completeFolderDelete}
+            >
+              ลบหมวด
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={editDiscardOpen} onOpenChange={setEditDiscardOpen}>
         <AlertDialogContent>

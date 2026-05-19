@@ -1,4 +1,5 @@
 import type { VaultData } from "./types";
+import { normalizeVaultData } from "./types";
 
 const SALT_LEN = 16;
 const IV_LEN = 12;
@@ -59,11 +60,17 @@ export async function decryptVault(key: CryptoKey, payloadB64: string): Promise<
   const cipher = combined.slice(IV_LEN);
   const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
   const json = new TextDecoder().decode(plainBuf);
-  const parsed = JSON.parse(json) as VaultData;
-  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.entries)) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
     throw new Error("Invalid vault file");
   }
-  return parsed;
+  try {
+    return normalizeVaultData(parsed);
+  } catch {
+    throw new Error("Invalid vault file");
+  }
 }
 
 export function randomSalt(): Uint8Array {
