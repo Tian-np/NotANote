@@ -88,6 +88,24 @@ Until Source is **GitHub Actions**, the **deploy** job cannot create a Pages dep
 1. Import the GitHub repository in [Vercel](https://vercel.com).
 2. Framework preset: **Vite**. Build: `npm run build`, output: `dist`.
 3. Do **not** set `VITE_BASE` on Vercel (leave default `/` for the root domain).
+4. Add the same `VITE_SUPABASE_*` environment variables as in `.env.local`.
+5. `vercel.json` in this repo sets **HTTP security headers** (CSP, X-Frame-Options, etc.) — [securityheaders.com](https://securityheaders.com) should grade **A** or **B** on Vercel.
+
+## Security headers (securityheaders.com)
+
+| Host | HTTP security headers | Typical grade |
+|------|----------------------|---------------|
+| **GitHub Pages** (`*.github.io`) | **Not supported** — GitHub does not let you set custom response headers | **D** (expected) |
+| **Vercel** | `vercel.json` | **A / B** |
+| **Cloudflare Pages** | `public/_headers` (copied to `dist/`) | **A / B** |
+
+`index.html` includes **meta-tag equivalents** (CSP, nosniff, etc.) so browsers still get some protection on GitHub Pages, but scanners like securityheaders.com only check **HTTP headers**, not meta tags.
+
+To improve the grade while keeping GitHub for source control:
+
+- **Easiest:** deploy to **Vercel** (free, connect the same repo) — see above.
+- **Alternative:** **Cloudflare Pages** (uses `public/_headers` from this repo).
+- **Custom domain + Cloudflare proxy:** add Transform Rules to inject headers (only works with your own domain, not `github.io`).
 
 ## Security notes
 
