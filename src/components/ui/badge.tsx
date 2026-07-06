@@ -3,13 +3,14 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold uppercase tracking-wide transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
   {
     variants: {
       variant: {
         default: "border-transparent bg-secondary text-secondary-foreground",
-        outline: "text-foreground border-border",
-        login: "border-cyan-500/40 bg-cyan-500/15 text-cyan-100",
+        outline: "text-foreground border-border bg-transparent",
+        login: "border-login/35 bg-login/10 text-login",
+        note: "border-note/35 bg-note/10 text-note",
       },
     },
     defaultVariants: {

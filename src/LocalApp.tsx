@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { VaultToast } from "@/components/vault/VaultToast";
 import { validatePassword } from "./security";
 import { VaultShell } from "./VaultShell";
 import type { VaultData } from "./types";
@@ -48,7 +49,7 @@ export function LocalApp() {
           return;
         }
         if (password !== password2) {
-          setAuthError("Passwords do not match.");
+          setAuthError("รหัสผ่านไม่ตรงกัน");
           return;
         }
         const initial = emptyVault();
@@ -57,11 +58,11 @@ export function LocalApp() {
         setHasLocalVault(true);
         setVaultPassword(password);
         setVaultData(initial);
-        showToast("Vault created. Your data stays encrypted in this browser.");
+        showToast("สร้างตู้เซฟแล้ว — ข้อมูลถูกเข้ารหัสในเบราว์เซอร์นี้");
       } else {
         const s = loadStored();
         if (!s) {
-          setAuthError("No vault found. Create one first.");
+          setAuthError("ไม่พบตู้เซฟ กรุณาสร้างใหม่ก่อน");
           return;
         }
         const unlocked = await unlockVault(password, s);
@@ -69,7 +70,11 @@ export function LocalApp() {
         setVaultData(unlocked);
       }
     } catch {
-      setAuthError(authTab === "unlock" ? "Wrong password or corrupted data." : "Could not create vault.");
+      setAuthError(
+        authTab === "unlock"
+          ? "รหัสผ่านไม่ถูกต้องหรือข้อมูลเสียหาย"
+          : "ไม่สามารถสร้างตู้เซฟได้",
+      );
     } finally {
       setBusy(false);
     }
@@ -105,12 +110,13 @@ export function LocalApp() {
   if (!vaultData || !vaultPassword) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center p-4">
-        <Card className="w-full max-w-md border-border/80 shadow-2xl">
+        <Card className="w-full max-w-md border-border/80 shadow-md">
           <CardHeader>
             <CardTitle>NotANote</CardTitle>
             <CardDescription>
-              Local-only: encrypted in this browser. Add <code className="text-primary">VITE_SUPABASE_*</code> in{" "}
-              <code className="text-primary">.env.local</code> for account login and multi-device sync.
+              โหมดเครื่องเดียว: เข้ารหัสในเบราว์เซอร์นี้ หากตั้งค่า{" "}
+              <code className="text-primary">VITE_SUPABASE_*</code> ใน{" "}
+              <code className="text-primary">.env.local</code> จะใช้บัญชีและซิงค์หลายอุปกรณ์ได้
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -124,41 +130,41 @@ export function LocalApp() {
             >
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="unlock" disabled={!hasLocalVault}>
-                  Unlock
+                  ปลดล็อก
                 </TabsTrigger>
-                <TabsTrigger value="create">New vault</TabsTrigger>
+                <TabsTrigger value="create">สร้างใหม่</TabsTrigger>
               </TabsList>
               <TabsContent value="unlock" className="mt-4 space-y-4">
                 <form onSubmit={handleAuth} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="unlock-pw">Master password</Label>
+                    <Label htmlFor="unlock-pw">รหัสผ่านหลัก</Label>
                     <PasswordInput id="unlock-pw" value={password} onChange={setPassword} autoComplete="off" required resetKey="unlock" />
                   </div>
                   {authError ? <p className="text-sm text-destructive">{authError}</p> : null}
                   <Button type="submit" className="w-full min-h-11" disabled={busy}>
-                    Unlock
+                    ปลดล็อก
                   </Button>
                 </form>
               </TabsContent>
               <TabsContent value="create" className="mt-4 space-y-4">
                 {hasLocalVault ? (
                   <p className="text-sm text-muted-foreground">
-                    Creating a new vault replaces data in this browser. Export an encrypted backup first if you need it.
+                    การสร้างตู้เซฟใหม่จะแทนที่ข้อมูลในเบราว์เซอร์นี้ หากต้องการเก็บข้อมูลเดิม ให้ส่งออกสำรองก่อน
                   </p>
                 ) : null}
                 <form onSubmit={handleAuth} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="create-pw">Master password</Label>
+                    <Label htmlFor="create-pw">รหัสผ่านหลัก</Label>
                     <PasswordInput id="create-pw" value={password} onChange={setPassword} autoComplete="off" required resetKey="create" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="create-pw2">Confirm password</Label>
+                    <Label htmlFor="create-pw2">ยืนยันรหัสผ่าน</Label>
                     <PasswordInput id="create-pw2" value={password2} onChange={setPassword2} autoComplete="off" required resetKey="create" />
                   </div>
                   {authError ? <p className="text-sm text-destructive">{authError}</p> : null}
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <Button type="submit" className="min-h-11 flex-1" disabled={busy}>
-                      Create vault
+                      สร้างตู้เซฟ
                     </Button>
                     {hasLocalVault ? (
                       <Button
@@ -166,13 +172,13 @@ export function LocalApp() {
                         variant="destructive"
                         className="min-h-11 flex-1"
                         onClick={() => {
-                          if (window.confirm("Erase vault from this browser? This cannot be undone.")) {
+                          if (window.confirm("ลบตู้เซฟจากเบราว์เซอร์นี้? ไม่สามารถย้อนกลับได้")) {
                             clearStored();
                             window.location.reload();
                           }
                         }}
                       >
-                        Erase local
+                        ลบข้อมูลในเครื่อง
                       </Button>
                     ) : null}
                   </div>
@@ -181,14 +187,12 @@ export function LocalApp() {
             </Tabs>
           </CardContent>
           <CardFooter className="flex-col items-stretch border-t border-border/60 pt-4">
-            <p className="text-center text-xs text-muted-foreground">Use a strong password and keep encrypted backups.</p>
+            <p className="text-center text-xs text-muted-foreground">
+              ใช้รหัสผ่านที่แข็งแรง และสำรองข้อมูลที่เข้ารหัสเป็นประจำ
+            </p>
           </CardFooter>
         </Card>
-        {toast ? (
-          <div className="fixed bottom-4 left-1/2 z-[100] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-full border border-border bg-card px-4 py-2 text-sm shadow-lg">
-            {toast}
-          </div>
-        ) : null}
+        {toast ? <VaultToast message={toast} mobileOffset={false} /> : null}
       </div>
     );
   }

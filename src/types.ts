@@ -1,4 +1,5 @@
 import { LIMITS, truncateField } from "./security";
+import type { LockPinConfig } from "./entryLock";
 
 export type EntryType = "note" | "login";
 
@@ -6,6 +7,8 @@ export interface VaultFolder {
   id: string;
   name: string;
   updatedAt: number;
+  /** null = ระดับราก */
+  parentId?: string | null;
 }
 
 export interface VaultEntry {
@@ -19,12 +22,15 @@ export interface VaultEntry {
   password?: string;
   /** อยู่ในหมวดนี้ — ไม่มีหรือ null = ยังไม่จัดกลุ่ม */
   folderId?: string | null;
+  locked?: boolean;
+  lockedPayload?: string;
 }
 
 export interface VaultData {
   version: 2;
   folders: VaultFolder[];
   entries: VaultEntry[];
+  lockPin?: LockPinConfig;
 }
 
 export function emptyVault(): VaultData {
@@ -36,6 +42,18 @@ function sanitizeEntry(raw: VaultEntry): VaultEntry {
     throw new Error("Invalid vault");
   }
   if (raw.type !== "note" && raw.type !== "login") throw new Error("Invalid vault");
+  const locked = Boolean(raw.locked && typeof raw.lockedPayload === "string");
+  if (locked) {
+    return {
+      id: raw.id,
+      type: raw.type,
+      title: "",
+      updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now(),
+      folderId: typeof raw.folderId === "string" ? raw.folderId : null,
+      locked: true,
+      lockedPayload: raw.lockedPayload,
+    };
+  }
   return {
     id: raw.id,
     type: raw.type,
@@ -58,14 +76,27 @@ function sanitizeEntry(raw: VaultEntry): VaultEntry {
   };
 }
 
-function sanitizeFolder(raw: VaultFolder): VaultFolder {
+function sanitizeLockPin(raw: unknown): LockPinConfig | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.saltB64 !== "string" || typeof o.verifierB64 !== "string") return undefined;
+  if (o.saltB64.length > 64 || o.verifierB64.length > 128) return undefined;
+  return { saltB64: o.saltB64, verifierB64: o.verifierB64 };
+}
+
+function sanitizeFolder(raw: VaultFolder, allIds: Set<string>): VaultFolder {
   if (!raw || typeof raw !== "object" || typeof raw.id !== "string") {
     throw new Error("Invalid vault");
+  }
+  let parentId: string | null = null;
+  if (typeof raw.parentId === "string") {
+    parentId = allIds.has(raw.parentId) && raw.parentId !== raw.id ? raw.parentId : null;
   }
   return {
     id: raw.id,
     name: truncateField(String(raw.name ?? ""), LIMITS.folderName),
     updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now(),
+    parentId,
   };
 }
 
@@ -87,7 +118,10 @@ export function normalizeVaultData(parsed: unknown): VaultData {
 
   if (!Array.isArray(o.folders)) throw new Error("Invalid vault");
   if (o.folders.length > LIMITS.maxFolders) throw new Error("Invalid vault");
-  const folders = (o.folders as VaultFolder[]).map(sanitizeFolder);
+  const rawFolders = o.folders as VaultFolder[];
+  const folderIds = new Set(rawFolders.map((f) => f.id));
+  const folders = rawFolders.map((f) => sanitizeFolder(f, folderIds));
+  const lockPin = sanitizeLockPin(o.lockPin);
 
-  return { version: 2, folders, entries };
+  return { version: 2, folders, entries, ...(lockPin ? { lockPin } : {}) };
 }

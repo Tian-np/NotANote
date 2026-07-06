@@ -20,14 +20,13 @@ import { validatePassword } from "./security";
 import { resealWithNewPassword, sealVault, unlockVault, type StoredBlob } from "./storage";
 import { VaultShell } from "./VaultShell";
 
-/** Maps Supabase Auth errors to clearer hints (especially built-in email quotas). */
 function authErrorHint(message: string): string {
   const m = message.toLowerCase();
   if (m.includes("rate limit") && (m.includes("email") || m.includes("mail"))) {
     return (
-      "Supabase’s built-in email quota was exceeded (very low on free tier). " +
-      "Turn off “Confirm email” under Dashboard → Authentication → Providers → Email so sign-up does not send mail. " +
-      "Or wait for the window to reset, or configure Custom SMTP (Project Settings → Authentication)."
+      "โควต้าอีเมลของ Supabase หมดแล้ว (ฟรี tier มีโควต้าน้อย) " +
+      "ปิด “Confirm email” ที่ Dashboard → Authentication → Providers → Email " +
+      "หรือรอให้โควต้ารีเซ็ต หรือตั้งค่า Custom SMTP (Project Settings → Authentication)"
     );
   }
   return message;
@@ -74,14 +73,14 @@ export function CloudApp() {
       setVaultPassword(passwordPlain);
       setVaultData(data);
     },
-    [sb]
+    [sb],
   );
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
     if (!isValidUsername(username)) {
-      setAuthError("Username: 3–32 characters, lowercase letters, digits, and underscores only.");
+      setAuthError("ชื่อผู้ใช้: 3–32 ตัวอักษร a–z, 0–9, _ เท่านั้น");
       return;
     }
     const pwError = validatePassword(password);
@@ -90,7 +89,7 @@ export function CloudApp() {
       return;
     }
     if (password !== password2) {
-      setAuthError("Passwords do not match.");
+      setAuthError("รหัสผ่านไม่ตรงกัน");
       return;
     }
     const normalized = normalizeUsername(username);
@@ -108,7 +107,7 @@ export function CloudApp() {
       }
       if (!data.session) {
         setAuthError(
-          "No session after sign-up. Confirm your email if required, or ask the site admin to enable sign-in without email confirmation for this project."
+          "ไม่ได้ session หลังสมัคร หากเปิดยืนยันอีเมล ให้ยืนยันก่อน หรือขอให้แอดมินปิดการยืนยันอีเมล",
         );
         return;
       }
@@ -119,7 +118,7 @@ export function CloudApp() {
       setSession(data.session);
       await openVault(userId, password);
     } catch (err) {
-      setAuthError(err instanceof Error ? authErrorHint(err.message) : "Sign up failed.");
+      setAuthError(err instanceof Error ? authErrorHint(err.message) : "สมัครสมาชิกไม่สำเร็จ");
     } finally {
       setBusy(false);
     }
@@ -129,7 +128,7 @@ export function CloudApp() {
     e.preventDefault();
     setAuthError(null);
     if (!isValidUsername(username)) {
-      setAuthError("Username: 3–32 characters, lowercase letters, digits, and underscores only.");
+      setAuthError("ชื่อผู้ใช้: 3–32 ตัวอักษร a–z, 0–9, _ เท่านั้น");
       return;
     }
     const authEmail = usernameToAuthEmail(normalizeUsername(username));
@@ -144,7 +143,7 @@ export function CloudApp() {
       await openVault(userId, password);
       setPassword("");
     } catch (err) {
-      setAuthError(err instanceof Error ? authErrorHint(err.message) : "Sign in failed.");
+      setAuthError(err instanceof Error ? authErrorHint(err.message) : "เข้าสู่ระบบไม่สำเร็จ");
     } finally {
       setBusy(false);
     }
@@ -159,7 +158,7 @@ export function CloudApp() {
       await openVault(session.user.id, password);
       setPassword("");
     } catch {
-      setAuthError("Wrong password, or your cloud vault was encrypted with a different password.");
+      setAuthError("รหัสผ่านไม่ถูกต้อง หรือตู้เซฟถูกเข้ารหัสด้วยรหัสอื่น");
     } finally {
       setBusy(false);
     }
@@ -180,7 +179,7 @@ export function CloudApp() {
       lastBlobRef.current = blob;
       await upsertVaultPayload(sb, session.user.id, blob);
     },
-    [sb, session?.user?.id]
+    [sb, session?.user?.id],
   );
 
   const onChangePassword = useCallback(
@@ -190,7 +189,6 @@ export function CloudApp() {
       if (!s) throw new Error("no blob");
       await unlockVault(oldPw, s);
       const blob = await resealWithNewPassword(oldPw, newPw, s);
-      // Upload re-encrypted vault before changing auth password to avoid desync.
       await upsertVaultPayload(sb, session.user.id, blob);
       const { error } = await sb.auth.updateUser({ password: newPw });
       if (error) {
@@ -202,7 +200,7 @@ export function CloudApp() {
       lastBlobRef.current = blob;
       setVaultPassword(newPw);
     },
-    [sb, session?.user?.id]
+    [sb, session?.user?.id],
   );
 
   const onImportReplace = useCallback(
@@ -211,7 +209,7 @@ export function CloudApp() {
       lastBlobRef.current = blob;
       await upsertVaultPayload(sb, session.user.id, blob);
     },
-    [sb, session?.user?.id]
+    [sb, session?.user?.id],
   );
 
   const onLock = () => {
@@ -223,7 +221,7 @@ export function CloudApp() {
   if (init) {
     return (
       <div className="flex min-h-dvh items-center justify-center p-6 text-muted-foreground">
-        <p>Loading…</p>
+        <p>กำลังโหลด…</p>
       </div>
     );
   }
@@ -239,7 +237,9 @@ export function CloudApp() {
         onLock={onLock}
         topBarExtra={
           <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-            <span className="max-w-[220px] truncate text-xs text-muted-foreground sm:text-sm">{displayUsername(session.user)}</span>
+            <span className="max-w-[220px] truncate text-xs text-muted-foreground sm:text-sm">
+              {displayUsername(session.user)}
+            </span>
             <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => void handleLogout()}>
               ออกจากระบบ
             </Button>
@@ -252,24 +252,26 @@ export function CloudApp() {
   if (session && (!vaultData || !vaultPassword)) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center p-4">
-        <Card className="w-full max-w-md border-border/80 shadow-2xl">
+        <Card className="w-full max-w-md border-border/80 shadow-md">
           <CardHeader>
-            <CardTitle>Unlock vault</CardTitle>
-            <CardDescription>Signed in as {displayUsername(session.user)}. Enter your account password.</CardDescription>
+            <CardTitle>ปลดล็อกตู้เซฟ</CardTitle>
+            <CardDescription>
+              เข้าสู่ระบบเป็น {displayUsername(session.user)} กรุณาใส่รหัสผ่านบัญชี
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleUnlockWithPassword} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="unlock-pw">Password</Label>
+                <Label htmlFor="unlock-pw">รหัสผ่าน</Label>
                 <PasswordInput id="unlock-pw" value={password} onChange={setPassword} autoComplete="current-password" required />
               </div>
               {authError ? <p className="text-sm text-destructive">{authError}</p> : null}
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Button type="submit" className="min-h-11 flex-1" disabled={busy}>
-                  Unlock
+                  ปลดล็อก
                 </Button>
                 <Button type="button" variant="outline" className="min-h-11 flex-1" onClick={() => void handleLogout()}>
-                  Different account
+                  เปลี่ยนบัญชี
                 </Button>
               </div>
             </form>
@@ -281,24 +283,31 @@ export function CloudApp() {
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center p-4">
-      <Card className="w-full max-w-md border-border/80 shadow-2xl">
+      <Card className="w-full max-w-md border-border/80 shadow-md">
         <CardHeader>
           <CardTitle>NotANote</CardTitle>
           <CardDescription>
-            Sign in to sync your encrypted vault across devices. Username only—no email verification; the app maps your
-            username to an internal id required by Supabase (no messages are sent).
+            เข้าสู่ระบบเพื่อซิงค์ตู้เซฟที่เข้ารหัสข้ามอุปกรณ์ ใช้ชื่อผู้ใช้เท่านั้น — แอปจะแมปเป็นตัวระบุภายในของ Supabase
+            (ไม่มีการส่งอีเมล)
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs value={tab} onValueChange={(v) => { setTab(v); setAuthError(null); }} className="w-full">
+          <Tabs
+            value={tab}
+            onValueChange={(v) => {
+              setTab(v);
+              setAuthError(null);
+            }}
+            className="w-full"
+          >
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="login">Log in</TabsTrigger>
-              <TabsTrigger value="register">Create account</TabsTrigger>
+              <TabsTrigger value="login">เข้าสู่ระบบ</TabsTrigger>
+              <TabsTrigger value="register">สมัครสมาชิก</TabsTrigger>
             </TabsList>
             <TabsContent value="login" className="mt-4 space-y-4">
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="username-login">Username</Label>
+                  <Label htmlFor="username-login">ชื่อผู้ใช้</Label>
                   <Input
                     id="username-login"
                     type="text"
@@ -311,19 +320,19 @@ export function CloudApp() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="lpw">Password</Label>
+                  <Label htmlFor="lpw">รหัสผ่าน</Label>
                   <PasswordInput id="lpw" value={password} onChange={setPassword} autoComplete="current-password" required resetKey={tab} />
                 </div>
                 {authError ? <p className="text-sm text-destructive">{authError}</p> : null}
                 <Button type="submit" className="w-full min-h-11" disabled={busy}>
-                  Log in
+                  เข้าสู่ระบบ
                 </Button>
               </form>
             </TabsContent>
             <TabsContent value="register" className="mt-4 space-y-4">
               <form onSubmit={handleRegister} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="username-register">Username</Label>
+                  <Label htmlFor="username-register">ชื่อผู้ใช้</Label>
                   <Input
                     id="username-register"
                     type="text"
@@ -334,26 +343,30 @@ export function CloudApp() {
                     required
                     className="min-h-11"
                   />
-                  <p className="text-xs text-muted-foreground">3–32 chars: a–z, 0–9, underscore. Stored as lowercase.</p>
+                  <p className="text-xs text-muted-foreground">
+                    3–32 ตัวอักษร: a–z, 0–9, _ จะถูกบันทึกเป็นตัวพิมพ์เล็ก
+                  </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="rpw">Password</Label>
+                  <Label htmlFor="rpw">รหัสผ่าน</Label>
                   <PasswordInput id="rpw" value={password} onChange={setPassword} autoComplete="new-password" required />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="rpw2">Confirm password</Label>
+                  <Label htmlFor="rpw2">ยืนยันรหัสผ่าน</Label>
                   <PasswordInput id="rpw2" value={password2} onChange={setPassword2} autoComplete="new-password" required />
                 </div>
                 {authError ? <p className="text-sm text-destructive">{authError}</p> : null}
                 <Button type="submit" className="w-full min-h-11" disabled={busy}>
-                  Create account
+                  สมัครสมาชิก
                 </Button>
               </form>
             </TabsContent>
           </Tabs>
         </CardContent>
         <CardFooter className="border-t border-border/60">
-          <p className="text-center text-xs text-muted-foreground">Notes are encrypted in your browser before upload.</p>
+          <p className="text-center text-xs text-muted-foreground">
+            โน้ตถูกเข้ารหัสในเบราว์เซอร์ก่อนอัปโหลด
+          </p>
         </CardFooter>
       </Card>
     </div>

@@ -4,6 +4,9 @@ export const MIN_PASSWORD_LENGTH = 8;
 
 export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
 
+export const LOCK_PIN_MIN = 4;
+export const LOCK_PIN_MAX = 6;
+
 export const LIMITS = {
   title: 200,
   content: 50_000,
@@ -14,6 +17,7 @@ export const LIMITS = {
   searchQuery: 200,
   maxEntries: 5000,
   maxFolders: 200,
+  maxFolderDepth: 10,
 } as const;
 
 /** Lock vault when the tab stays hidden longer than this. */
@@ -28,7 +32,17 @@ export function truncateField(value: string, max: number): string {
 
 export function validatePassword(password: string): string | null {
   if (password.length < MIN_PASSWORD_LENGTH) {
-    return `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
+    return `ใช้อย่างน้อย ${MIN_PASSWORD_LENGTH} ตัวอักษร`;
+  }
+  return null;
+}
+
+export function validateLockPin(pin: string): string | null {
+  if (!/^\d+$/.test(pin)) {
+    return "PIN ต้องเป็นตัวเลขเท่านั้น";
+  }
+  if (pin.length < LOCK_PIN_MIN || pin.length > LOCK_PIN_MAX) {
+    return `ใช้ PIN ${LOCK_PIN_MIN}–${LOCK_PIN_MAX} หลัก`;
   }
   return null;
 }

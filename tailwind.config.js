@@ -45,6 +45,17 @@ export default {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
+        note: {
+          DEFAULT: "hsl(var(--note-accent))",
+        },
+        login: {
+          DEFAULT: "hsl(var(--login-accent))",
+          foreground: "hsl(var(--login-accent-foreground))",
+        },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+        },
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
