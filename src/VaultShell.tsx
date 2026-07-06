@@ -41,6 +41,15 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { VaultData, VaultEntry, VaultFolder } from "./types";
+import {
+  CLIPBOARD_CLEAR_MS,
+  HIDDEN_TAB_LOCK_MS,
+  isValidImportBlob,
+  LIMITS,
+  MAX_IMPORT_FILE_BYTES,
+  truncateField,
+  validatePassword,
+} from "./security";
 import { sealVault, unlockVault, type StoredBlob } from "./storage";
 
 type VaultEntryType = VaultEntry["type"];
@@ -208,6 +217,7 @@ export function VaultShell({
   type SyncStatus = "idle" | "saving" | "saved" | "error";
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const savedHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clipboardClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Draft for “create new” modal — not persisted until user clicks บันทึก. */
   const [createModal, setCreateModal] = useState<{
@@ -380,6 +390,33 @@ export function VaultShell({
     };
   }, [showToast]);
 
+  /** Auto-lock when the tab stays hidden (e.g. user switched apps). */
+  useEffect(() => {
+    let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenTimer = setTimeout(() => {
+          showToast("ล็อกอัตโนมัติขณะแท็บถูกซ่อน");
+          handleLockRef.current();
+        }, HIDDEN_TAB_LOCK_MS);
+      } else if (hiddenTimer) {
+        clearTimeout(hiddenTimer);
+        hiddenTimer = null;
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (hiddenTimer) clearTimeout(hiddenTimer);
+    };
+  }, [showToast]);
+
+  useEffect(() => {
+    return () => {
+      if (clipboardClearTimerRef.current) clearTimeout(clipboardClearTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     const open = createModal !== null;
     if (!open) {
@@ -430,6 +467,10 @@ export function VaultShell({
   const submitCreateModal = (e: React.FormEvent) => {
     e.preventDefault();
     if (!createModal) return;
+    if (data.entries.length >= LIMITS.maxEntries) {
+      showToast(`Cannot add more than ${LIMITS.maxEntries} entries.`);
+      return;
+    }
     const id = newId();
     const titleTrim = createModal.title.trim();
     const folderPick = createModal.folderId.trim();
@@ -463,8 +504,12 @@ export function VaultShell({
 
   const submitNewFolder = (e: React.FormEvent) => {
     e.preventDefault();
-    const name = newFolderName.trim();
+    const name = truncateField(newFolderName.trim(), LIMITS.folderName);
     if (!name) return;
+    if (data.folders.length >= LIMITS.maxFolders) {
+      showToast(`Cannot add more than ${LIMITS.maxFolders} folders.`);
+      return;
+    }
     const folder: VaultFolder = {
       id: newId(),
       name,
@@ -601,10 +646,14 @@ export function VaultShell({
     const file = ev.target.files?.[0];
     ev.target.value = "";
     if (!file) return;
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      showToast("Import file is too large (max 5 MB).");
+      return;
+    }
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text) as StoredBlob;
-      if (!parsed.saltB64 || !parsed.payloadB64) throw new Error("bad");
+      const parsed: unknown = JSON.parse(text);
+      if (!isValidImportBlob(parsed)) throw new Error("bad");
       const imported = await unlockVault(vaultPassword, parsed);
       setImportConfirm({ imported, blob: parsed });
     } catch {
@@ -624,10 +673,19 @@ export function VaultShell({
     showToast("Backup restored.");
   };
 
-  const copyText = async (label: string, value: string) => {
+  const copyText = async (label: string, value: string, opts?: { sensitive?: boolean }) => {
     try {
       await navigator.clipboard.writeText(value);
-      showToast(`${label} copied`);
+      if (opts?.sensitive) {
+        if (clipboardClearTimerRef.current) clearTimeout(clipboardClearTimerRef.current);
+        clipboardClearTimerRef.current = setTimeout(() => {
+          void navigator.clipboard.writeText("").catch(() => {});
+          clipboardClearTimerRef.current = null;
+        }, CLIPBOARD_CLEAR_MS);
+        showToast(`${label} copied — clipboard clears in 30s`);
+      } else {
+        showToast(`${label} copied`);
+      }
     } catch {
       showToast("Clipboard not available.");
     }
@@ -673,8 +731,9 @@ export function VaultShell({
   const submitChangePw = async (e: React.FormEvent) => {
     e.preventDefault();
     setPwModalError(null);
-    if (newPw.length < 8) {
-      setPwModalError("New password must be at least 8 characters.");
+    const pwError = validatePassword(newPw);
+    if (pwError) {
+      setPwModalError(pwError);
       return;
     }
     if (newPw !== newPw2) {
@@ -800,9 +859,10 @@ export function VaultShell({
             id="vault-search"
             placeholder="ค้นหา…"
             value={query}
-            onChange={(ev) => setQuery(ev.target.value)}
+            onChange={(ev) => setQuery(truncateField(ev.target.value, LIMITS.searchQuery))}
             aria-label="ค้นหา"
             className="min-h-11"
+            maxLength={LIMITS.searchQuery}
           />
         </div>
         <div className="w-full sm:w-auto sm:min-w-[280px]">{filterButtons}</div>
@@ -1231,6 +1291,7 @@ export function VaultShell({
                         }
                         className="min-h-11"
                         placeholder="Unititled Note"
+                        maxLength={LIMITS.title}
                       />
                     </div>
                     <div className="space-y-2">
@@ -1267,6 +1328,7 @@ export function VaultShell({
                           }
                           placeholder="พิมพ์โน้ต…"
                           className="min-h-[140px]"
+                          maxLength={LIMITS.content}
                         />
                       </div>
                     ) : (
@@ -1283,6 +1345,7 @@ export function VaultShell({
                               )
                             }
                             placeholder="https://…"
+                            maxLength={LIMITS.url}
                           />
                         </div>
                         <div className="space-y-2">
@@ -1299,6 +1362,7 @@ export function VaultShell({
                               )
                             }
                             placeholder="อีเมลหรือชื่อผู้ใช้"
+                            maxLength={LIMITS.username}
                           />
                         </div>
                         <div className="space-y-2">
@@ -1379,6 +1443,7 @@ export function VaultShell({
                         }
                         className="min-h-11"
                         placeholder="Untitled login"
+                        maxLength={LIMITS.title}
                       />
                     </div>
                     <div className="space-y-2">
@@ -1422,6 +1487,7 @@ export function VaultShell({
                           }
                           placeholder="พิมพ์โน้ต…"
                           className="min-h-[140px]"
+                          maxLength={LIMITS.content}
                         />
                       </div>
                     ) : (
@@ -1439,6 +1505,7 @@ export function VaultShell({
                                 )
                               }
                               placeholder="https://…"
+                              maxLength={LIMITS.url}
                             />
                             <Button
                               type="button"
@@ -1465,6 +1532,7 @@ export function VaultShell({
                                 )
                               }
                               placeholder="อีเมลหรือชื่อผู้ใช้"
+                              maxLength={LIMITS.username}
                             />
                             <Button
                               type="button"
@@ -1474,6 +1542,7 @@ export function VaultShell({
                                 void copyText(
                                   "Login ID",
                                   editDraft.username ?? "",
+                                  { sensitive: true },
                                 )
                               }
                             >
@@ -1504,6 +1573,7 @@ export function VaultShell({
                                 void copyText(
                                   "Password",
                                   editDraft.password ?? "",
+                                  { sensitive: true },
                                 )
                               }
                             >
@@ -1576,6 +1646,7 @@ export function VaultShell({
                 onChange={(ev) => setNewFolderName(ev.target.value)}
                 placeholder="เช่น งาน · ส่วนตัว · โปรเจกต์"
                 className="min-h-11"
+                maxLength={LIMITS.folderName}
               />
             </div>
             <Button

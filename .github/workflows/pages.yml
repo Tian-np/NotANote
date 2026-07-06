@@ -23,6 +23,7 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm install
+      - run: npm audit --audit-level=high --omit=dev
       - run: npm run build
         env:
           VITE_BASE: /NotANote/

@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { validatePassword } from "./security";
 import { VaultShell } from "./VaultShell";
 import type { VaultData } from "./types";
 import { emptyVault } from "./types";
@@ -41,8 +42,9 @@ export function LocalApp() {
     setBusy(true);
     try {
       if (authTab === "create") {
-        if (password.length < 8) {
-          setAuthError("Use at least 8 characters for your master password.");
+        const pwError = validatePassword(password);
+        if (pwError) {
+          setAuthError(pwError);
           return;
         }
         if (password !== password2) {

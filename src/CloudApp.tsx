@@ -16,6 +16,7 @@ import { fetchVaultPayload, upsertVaultPayload } from "./cloudVault";
 import { getSupabase } from "./supabaseClient";
 import type { VaultData } from "./types";
 import { emptyVault } from "./types";
+import { validatePassword } from "./security";
 import { resealWithNewPassword, sealVault, unlockVault, type StoredBlob } from "./storage";
 import { VaultShell } from "./VaultShell";
 
@@ -83,8 +84,9 @@ export function CloudApp() {
       setAuthError("Username: 3–32 characters, lowercase letters, digits, and underscores only.");
       return;
     }
-    if (password.length < 8) {
-      setAuthError("Use at least 8 characters for your password.");
+    const pwError = validatePassword(password);
+    if (pwError) {
+      setAuthError(pwError);
       return;
     }
     if (password !== password2) {
@@ -106,7 +108,7 @@ export function CloudApp() {
       }
       if (!data.session) {
         setAuthError(
-          "No session after sign-up. In Supabase → Authentication → Providers → Email, turn off “Confirm email” so accounts work without email verification (and avoid email rate limits)."
+          "No session after sign-up. Confirm your email if required, or ask the site admin to enable sign-in without email confirmation for this project."
         );
         return;
       }
@@ -188,9 +190,15 @@ export function CloudApp() {
       if (!s) throw new Error("no blob");
       await unlockVault(oldPw, s);
       const blob = await resealWithNewPassword(oldPw, newPw, s);
-      const { error } = await sb.auth.updateUser({ password: newPw });
-      if (error) throw error;
+      // Upload re-encrypted vault before changing auth password to avoid desync.
       await upsertVaultPayload(sb, session.user.id, blob);
+      const { error } = await sb.auth.updateUser({ password: newPw });
+      if (error) {
+        const rollback = await resealWithNewPassword(newPw, oldPw, blob);
+        await upsertVaultPayload(sb, session.user.id, rollback);
+        lastBlobRef.current = rollback;
+        throw error;
+      }
       lastBlobRef.current = blob;
       setVaultPassword(newPw);
     },

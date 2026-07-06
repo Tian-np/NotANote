@@ -21,4 +21,8 @@ create policy "user_vaults_update_own"
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
-grant select, insert, update on public.user_vaults to authenticated;
+create policy "user_vaults_delete_own"
+  on public.user_vaults for delete
+  using (auth.uid() = user_id);
+
+grant select, insert, update, delete on public.user_vaults to authenticated;
